@@ -25,6 +25,10 @@
 #include <float.h>
 #include <math.h>
 
+#ifdef THORVG_AVX_VECTOR_SUPPORT
+    #include <immintrin.h>
+#endif
+
 /************************************************************************/
 /* Internal Class Implementation                                        */
 /************************************************************************/
@@ -110,7 +114,44 @@ static bool _translucent(const SwSurface* surface, uint8_t a)
 /************************************************************************/
 /* Rect                                                                 */
 /************************************************************************/
+#ifdef THORVG_AVX_VECTOR_SUPPORT
+static bool _translucentRect(SwSurface* surface, const SwBBox& region, uint32_t c) {
+    auto buffer = surface->buffer + (region.min.y * surface->stride) + region.min.x;
+    auto h = static_cast<uint32_t>(region.max.y - region.min.y);
+    auto w = static_cast<uint32_t>(region.max.x - region.min.x);
 
+    __m128i vColor = _mm_set1_epi32(c);
+    __m128i vInvAlpha = _mm_set1_epi32(255 - (c >> 24));
+    uint32_t ialpha = 255 - _colorAlpha(c);
+
+    uint32_t iterations = w / 4;
+    uint32_t avxFilled = iterations * 4;
+    uint32_t left = w - avxFilled;
+
+    if (avxFilled > 0) {
+        for (uint32_t y = 0; y < h; ++y) {
+            __m128i_u *dest = (__m128i_u *) &buffer[y * surface->stride];
+            //Calculate how many columns will be filled by avx
+            for (uint32_t x = 0; x < avxFilled; x += 4) {
+                *dest = _mm_add_epi32(vColor, ALPHA_BLEND_128(*dest, vInvAlpha));
+                dest++;
+            }
+        }
+    }
+
+    if (left > 0) {
+        for (uint32_t y = 0; y < h; ++y) {
+            //Fill leftovers
+            auto dst = &buffer[y * surface->stride];
+            for (uint32_t x = avxFilled; x < w; ++x) {
+                dst[x] = c + ALPHA_BLEND(dst[x], ialpha);
+            }
+        }
+    }
+
+    return true;
+}
+#else
 static bool _translucentRect(SwSurface* surface, const SwBBox& region, uint32_t color)
 {
     auto buffer = surface->buffer + (region.min.y * surface->stride) + region.min.x;
@@ -126,7 +167,7 @@ static bool _translucentRect(SwSurface* surface, const SwBBox& region, uint32_t 
     }
     return true;
 }
-
+#endif
 
 static bool _translucentRectAlphaMask(SwSurface* surface, const SwBBox& region, uint32_t color)
 {

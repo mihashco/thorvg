@@ -49,6 +49,11 @@ static double timeStamp()
 using SwCoord = signed long;
 using SwFixed = signed long long;
 
+#ifdef THORVG_AVX_VECTOR_SUPPORT
+    static __m128i himask = _mm_set1_epi32(0x00ff00ff);
+    static __m128i lomask = _mm_set1_epi32(0xff00ff00);
+#endif
+
 struct SwPoint
 {
     SwCoord x, y;
@@ -248,6 +253,23 @@ static inline SwCoord TO_SWCOORD(float val)
 {
     return SwCoord(val * 64);
 }
+
+#ifdef THORVG_AVX_VECTOR_SUPPORT
+static inline __m128i ALPHA_BLEND_128(__m128i c, __m128i a)
+{
+    __m128i vtemp = c;
+    c = _mm_srai_epi32(c, 8);
+    c = _mm_and_si128(c, himask);
+    c = _mm_mullo_epi32(c, a);
+    c = _mm_and_si128(c, lomask);
+
+    vtemp = _mm_and_si128(vtemp, himask);
+    vtemp = _mm_mullo_epi32(vtemp, a);
+    vtemp = _mm_srai_epi32(vtemp, 8);
+    vtemp = _mm_and_si128(vtemp, himask);
+    return (_mm_add_epi32(c, vtemp));
+}
+#endif
 
 static inline uint32_t ALPHA_BLEND(uint32_t c, uint32_t a)
 {
