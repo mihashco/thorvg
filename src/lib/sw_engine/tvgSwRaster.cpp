@@ -182,6 +182,7 @@ static bool _translucentRectAlphaMask(SwSurface* surface, const SwBBox& region, 
 
 static bool _translucentRectInvAlphaMask(SwSurface* surface, const SwBBox& region, uint32_t color)
 {
+    printf("[%s:%d][%s]\n", __FILE__, __LINE__, __func__);
     auto buffer = surface->buffer + (region.min.y * surface->stride) + region.min.x;
     auto h = static_cast<uint32_t>(region.max.y - region.min.y);
     auto w = static_cast<uint32_t>(region.max.x - region.min.x);
@@ -218,7 +219,6 @@ static bool _rasterTranslucentRect(SwSurface* surface, const SwBBox& region, uin
     return _translucentRect(surface, region, color);
 }
 
-
 static bool _rasterSolidRect(SwSurface* surface, const SwBBox& region, uint32_t color)
 {
     auto buffer = surface->buffer + (region.min.y * surface->stride);
@@ -235,10 +235,9 @@ static bool _rasterSolidRect(SwSurface* surface, const SwBBox& region, uint32_t 
 /************************************************************************/
 /* Rle                                                                  */
 /************************************************************************/
-
-
 static bool _translucentRle(SwSurface* surface, const SwRleData* rle, uint32_t color)
 {
+    #ifndef THORVG_AVX_VECTOR_SUPPORT
     auto span = rle->spans;
     uint32_t src;
 
@@ -253,8 +252,42 @@ static bool _translucentRle(SwSurface* surface, const SwRleData* rle, uint32_t c
         ++span;
     }
     return true;
-}
+    #else
+    auto span = rle->spans;
+    uint32_t src;
 
+    for (uint32_t i = 0; i < rle->size; ++i) {
+        //destination
+        __m128i_u *dest = (__m128i_u *) &surface->buffer[span->y * surface->stride + span->x];
+
+        if (span->coverage < 255) src = ALPHA_BLEND(color, span->coverage);
+        else src = color;
+
+        __m128i vInvAlpha = _mm_set1_epi32(255 - (src >> 24));
+
+        uint32_t ialpha = 255 - _colorAlpha(src);
+        uint32_t iterations = span->len / 4;
+        uint32_t avxFilled = iterations * 4;
+        uint32_t left = span->len - avxFilled;
+
+        if (avxFilled) {
+            for (uint32_t x = 0; x < span->len; x += 4) {
+                ALPHA_BLEND_128(*dest, vInvAlpha);
+            }
+        }
+
+        if (left) {
+            auto dst = &surface->buffer[span->y * surface->stride + span->x];
+            for (uint32_t x = avxFilled; x < span->len; ++x) {
+                dst[x] = src + ALPHA_BLEND(dst[x], ialpha);
+            }
+        }
+
+        ++span;
+    }
+    return true;
+    #endif
+}
 
 static bool _translucentRleAlphaMask(SwSurface* surface, const SwRleData* rle, uint32_t color)
 {
@@ -285,6 +318,7 @@ static bool _translucentRleAlphaMask(SwSurface* surface, const SwRleData* rle, u
 
 static bool _translucentRleInvAlphaMask(SwSurface* surface, SwRleData* rle, uint32_t color)
 {
+    printf("[%s:%d][%s]\n", __FILE__, __LINE__, __func__);
 #ifdef THORVG_LOG_ENABLED
     cout <<"SW_ENGINE: Rle Inverse Alpha Mask Composition" << endl;
 #endif
@@ -326,7 +360,6 @@ static bool _rasterTranslucentRle(SwSurface* surface, SwRleData* rle, uint32_t c
     return _translucentRle(surface, rle, color);
 }
 
-
 static bool _rasterSolidRle(SwSurface* surface, const SwRleData* rle, uint32_t color)
 {
     if (!rle) return false;
@@ -337,12 +370,37 @@ static bool _rasterSolidRle(SwSurface* surface, const SwRleData* rle, uint32_t c
         if (span->coverage == 255) {
             rasterRGBA32(surface->buffer + span->y * surface->stride, color, span->x, span->len);
         } else {
+#ifndef THORVG_AVX_VECTOR_SUPPORT
             auto dst = &surface->buffer[span->y * surface->stride + span->x];
             auto src = ALPHA_BLEND(color, span->coverage);
             auto ialpha = 255 - span->coverage;
             for (uint32_t i = 0; i < span->len; ++i) {
                 dst[i] = src + ALPHA_BLEND(dst[i], ialpha);
             }
+#else
+            __m128i_u *dest = (__m128i_u *) &surface->buffer[span->y * surface->stride + span->x];
+
+            uint32_t src = ALPHA_BLEND(color, span->coverage);
+            uint32_t ialpha = 255 - span->coverage;
+            uint32_t iterations = span->len / 4;
+            uint32_t avxFilled = iterations * 4;
+            uint32_t left = span->len - avxFilled;
+
+             __m128i vInvAlpha = _mm_set1_epi32(255 - (src >> 24));
+
+            if (avxFilled) {
+                for (uint32_t x = 0; x < span->len; x += 4) {
+                    ALPHA_BLEND_128(*dest, vInvAlpha);
+                }
+            }
+
+            if (left > 0) {
+                auto dst = &surface->buffer[span->y * surface->stride + span->x];
+                for (uint32_t i = avxFilled; i < span->len; ++i) {
+                    dst[i] = src + ALPHA_BLEND(dst[i], ialpha);
+                }
+            }
+#endif
         }
         ++span;
     }
