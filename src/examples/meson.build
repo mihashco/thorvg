@@ -49,7 +49,8 @@ endforeach
 
 if get_option('bindings').contains('capi') == true
     capi_source_file = [
-        'Capi.cpp'
+        'Capi.cpp',
+        'CapiMultipleFrames.cpp'
     ]
 
     foreach current_file : capi_source_file
