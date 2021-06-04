@@ -2,6 +2,7 @@ test_file = [
     'testMain.cpp',
     'testInitializer.cpp',
     'capi/testFill.cpp',
+    'capi/testRadialGradient.cpp',
 ]
 
 tests = executable('tvgUnitTests',
