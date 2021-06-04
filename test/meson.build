@@ -1,6 +1,7 @@
 test_file = [
     'testMain.cpp',
     'testInitializer.cpp',
+    'capi/testFill.cpp',
 ]
 
 tests = executable('tvgUnitTests',
